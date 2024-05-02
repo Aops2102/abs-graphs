@@ -15,11 +15,11 @@
 - utility.py: Provides various data processing utilities, such as computing relative changes, generating indexed time series, and summarizing statistical data.
 
 ## Installation
-To install the library and use it, you need Python 3.12 and run the command pip install -r requirements.txt for the python libs.
+To install the library and use it, you need Python 3.12 and run the command 'pip install -r requirements.txt' for the python libs.
 
 ## Usage
 Just run the main.py and the new version of the PDF will be generated.
 
 ## References
-The module for getting the data from ABS was copy from the repository below:
+The module for getting the data from ABS was copied from the repository below:
 https://github.com/bpalmer4/Charts-based-on-ABS-data
