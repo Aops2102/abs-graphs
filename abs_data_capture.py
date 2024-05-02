@@ -51,8 +51,6 @@ from bs4 import BeautifulSoup
 
 # local imports
 import common
-from utility import qtly_to_monthly
-
 
 # === typing information
 # public
@@ -79,7 +77,6 @@ Metacol = namedtuple(
         "cat",
     ],
 )
-
 
 # An unpacked zipfile and metadata
 AbsDict = dict[str, pd.DataFrame]
@@ -150,7 +147,6 @@ _CACHE_DIR: Final[str] = "./ABS_CACHE/"
 _CACHE_PATH: Final[Path] = Path(_CACHE_DIR)
 _CACHE_PATH.mkdir(parents=True, exist_ok=True)
 
-
 # === utility functions
 # public
 def clear_cache() -> None:
@@ -161,7 +157,6 @@ def clear_cache() -> None:
         for fs_object in Path(_CACHE_DIR).glob(extension):
             if fs_object.is_file():
                 fs_object.unlink()
-
 
 # === Data capture from the ABS
 # private
@@ -175,7 +170,6 @@ def _get_abs_page(
     url = f"{head}{page.theme}/{page.parent_topic}/{page.topic}{tail}"
     return common.request_get(url)
 
-
 # private
 def _prefix_url(url: str) -> str:
     """Apply ABS URL prefix to relative links."""
@@ -186,7 +180,6 @@ def _prefix_url(url: str) -> str:
     url = url.replace(prefix.replace("https://", "http://"), "")
     # add the prefix (back) ...
     return f"{prefix}{url}"
-
 
 # public
 @cache
@@ -236,7 +229,6 @@ def get_data_links(
 
     return link_dict
 
-
 # private
 def _get_abs_zip_file(
     landing_page: AbsLandingPage, 
@@ -269,7 +261,6 @@ def _get_abs_zip_file(
             zip_file.writestr(f"/{name}", file_bytes)
     zip_buf.seek(0)
     return zip_buf.read()
-
 
 # private
 def _get_meta_from_excel(
@@ -320,7 +311,6 @@ def _get_meta_from_excel(
     file_meta[metacol.tdesc] = tab_desc.strip()
     file_meta[metacol.cat] = cat_id.strip()
     return file_meta
-
 
 # private
 def _unpack_excel_into_df(
@@ -374,12 +364,10 @@ def _unpack_excel_into_df(
 
     return data
 
-
 # regex patterns for the next function
 PATTERN_SUBSUB = re.compile(r"_([0-9]+[a-zA-Z]?)_")
 PATTERN_NUM_ALPHA = re.compile(r"^([0-9]+[a-zA-Z]?)_[a-zA-z_]+$")
 PATTERN_FOUND = re.compile(r"^[0-9]+[a-zA-Z]?$")
-
 
 # private
 def _get_table_name(z_name: str, e_name: str, verbose: bool):
@@ -424,7 +412,6 @@ def _get_table_name(z_name: str, e_name: str, verbose: bool):
     if verbose:
         print(f"table names: {z_name=} {e_name=} --> {r_value=}")
     return r_value
-
 
 # private
 def _get_all_dataframes(zip_file: bytes, verbose: bool) -> AbsDict:
@@ -500,7 +487,6 @@ def _get_all_dataframes(zip_file: bytes, verbose: bool) -> AbsDict:
     returnable[META_DATA] = meta
     return returnable
 
-
 # public
 @cache
 def get_abs_data(
@@ -538,7 +524,6 @@ def get_abs_data(
         # dictionary should contain meta_data, plus one or more other dataframes
         raise AbsCaptureError("Could not extract dataframes from zipfile")
     return dictionary
-
 
 # === find ABS data based on search terms
 # public
@@ -598,8 +583,8 @@ def iudts_from_row(row: pd.Series) -> tuple[str, str, str, str, str]:
     )
 
 def clean_description(description: str) -> str:
-    """Limpa a descrição da série removendo unidades e caracteres extras."""
-    # Remove tudo após o primeiro ponto e vírgula e espaços extras
+    """Cleans the series description by removing units and extra characters."""
+    # Split the description at the first semicolon and remove extra spaces
     cleaned = description.split(';', 1)[0].strip()
     return cleaned
 
@@ -608,66 +593,69 @@ def create_selector_series_dataframe(
         selector: dict[str, str], 
         regex=False, 
         verbose: bool = False) -> pd.DataFrame:
-    """Cria um DataFrame com as séries selecionadas dos dados da ABS.
+    """Creates a DataFrame with selected series from ABS data.
     
     Arguments:
-    - abs_dict: dict[str, DataFrame] - dicionário contendo DataFrames de dados da ABS.
-    - selector: dict - usado com `find_rows()` para selecionar linhas do meta.
-    - regex: bool - se verdadeiro, permite uso de expressões regulares na seleção.
-    - verbose: bool - se verdadeiro, exibe informações adicionais durante o processo.
+    - abs_dict: dict[str, DataFrame] - dictionary containing ABS data DataFrames.
+    - selector: dict - used with `find_rows()` to select rows from metadata.
+    - regex: bool - if True, allows the use of regular expressions in selection.
+    - verbose: bool - if True, displays additional information during the process.
     
     Returns:
-    - DataFrame contendo as séries de dados selecionadas, com a descrição da série como nome das colunas, limpa de unidades e caracteres extras.
+    - DataFrame containing selected data series, with the series description as column names, cleaned from units and extra characters.
     """
     
-    # DataFrame para coletar as séries
+    # DataFrame to collect the series
     series_df = pd.DataFrame()
 
-    # Encontra as linhas correspondentes no meta usando o seletor
+    # Find corresponding rows in metadata using the selector
     selected_rows = find_rows(abs_dict[META_DATA], selector, regex=regex, verbose=verbose)
 
-    # Itera sobre cada linha encontrada para extrair as séries correspondentes
+    # Iterate over each found row to extract the corresponding series
     for _, row in selected_rows.iterrows():
         series_id, _, description, table, _ = iudts_from_row(row)
-        # Limpa a descrição para usar como nome da coluna
+        # Clean the description to use as column name
         clean_desc = clean_description(description)
         if verbose:
             print(f"Adding series {clean_desc} from table {table}")
         
-        # Extrai a série e usa a descrição limpa da série como nome da coluna
+        # Extract the series and use the cleaned series description as column name
         series_df[clean_desc] = abs_dict[table][series_id]
     
-    # Retorna o DataFrame com todas as séries coletadas
+    # Return the DataFrame with all collected series
     return series_df
 
-def create_all_series_dataframe(abs_dict: AbsDict):
+def compile_series_from_table(
+        abs_dict: AbsDict, 
+        table_name: str, 
+        verbose: bool = False) -> pd.DataFrame:
     """
-    Cria um DataFrame contendo todas as séries de dados presentes no dicionário de dados da ABS.
+    Compiles all series from a specified table into a DataFrame.
 
-    Argumentos:
-    - abs_dict: dict - dicionário contendo DataFrames de dados da ABS.
+    Arguments:
+    - abs_dict: dict[str, DataFrame] - dictionary containing ABS data and metadata DataFrames.
+    - table_name: str - name of the table from which to extract the series.
+    - verbose: bool - if True, displays additional information during the process.
 
-    Retorna:
-    - DataFrame contendo todas as séries de dados presentes nos dados da ABS, com a descrição da série e o tipo como nome das colunas.
+    Returns:
+    - DataFrame with each series as a column.
     """
+    # Check if the specified table is present in the dictionary
+    if table_name not in abs_dict:
+        raise ValueError("Specified table is not present in the dictionary")
 
-    # DataFrame para coletar as séries
+    # DataFrame to collect the series
     series_df = pd.DataFrame()
 
-    # Itera sobre cada DataFrame no dicionário
-    for table, df in abs_dict.items():
-        # Ignora o DataFrame de meta-dados
-        if table == META_DATA:
-            continue
+    # Iterate over each series in the specified DataFrame
+    for series_id in abs_dict[table_name].columns:
+        # Get the series description from the metadata DataFrame
+        if verbose:
+            print(f"Adding series ID {series_id} to DataFrame")
+        description = abs_dict['META_DATA'].loc[abs_dict['META_DATA']['Series ID'] == series_id, 'Data Item Description'].values[0]
 
-        # Itera sobre cada série de dados no DataFrame
-        for series_id, series_data in df.items():
-            # Obtém a descrição e o tipo da série usando o DataFrame de meta-dados
-            description = abs_dict[META_DATA].loc[abs_dict[META_DATA]["Series ID"] == series_id, "Data Item Description"].values[0]
-            series_type = abs_dict[META_DATA].loc[abs_dict[META_DATA]["Series ID"] == series_id, "Series Type"].values[0]
-
-            # Adiciona a série ao DataFrame resultante, usando a descrição e o tipo como nome da coluna
-            series_df[f"{description}_{series_type}"] = series_data
+        # Add the series to the resulting DataFrame, using the series description as the column name
+        series_df[description] = abs_dict[table_name][series_id]
 
     return series_df
 

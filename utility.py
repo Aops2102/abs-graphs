@@ -1,97 +1,113 @@
-from typing import TypeVar, Optional, cast
-from pandas import Series, DataFrame, PeriodIndex, DatetimeIndex
+import pandas as pd
 
-# - define a useful typevar for working with both Series and DataFrames
-DataT = TypeVar("DataT", Series, DataFrame)
+def absolute_change(data: pd.Series, periods: int|float = 1) -> pd.Series:
+    """Calculate an n-periods absolute change."""
+    return data - data.shift(periods)
 
-
-def percent_change(data: DataT, periods: int) -> DataT:
+def percent_change(data: pd.Series, periods: int|float = 1) -> pd.Series:
     """Calculate an n-periods percentage change."""
-
     return (data / data.shift(periods) - 1) * 100
 
+def create_index_series(series: pd.Series, base_date: str) -> pd.Series:
+    """ Return a series with values adjusted by the index."""
+    
+    # Check if base_date is in the series index
+    if base_date not in series.index:
+        raise ValueError("base_date not found in the series index")
 
-def annualise_rates(data: DataT, periods: int|float = 12) -> DataT:
-    """Annualise a growth rate for a period.
-    Note: returns a percentage (and not a rate)!"""
+    # Calculate the index factor
+    base_value = series.loc[base_date]
+    if base_value == 0:
+        raise ValueError("base_value at base_date is zero, cannot create index")
 
-    return (((1 + data) ** periods) - 1) * 100
+    indexed_series = (series / base_value) * 100
+    return indexed_series
 
+def custom_quarter_to_timestamp(index):
+    """
+    Convert a pandas PeriodIndex with quarterly periods (custom ending in FEB, MAY, AUG, NOV)
+    to a DatetimeIndex where each quarter is represented by the actual end date.
 
-def annualise_percentages(data: DataT, periods: int|float = 12) -> DataT:
-    """Annualise a growth rate (expressed as a percentage) for a period."""
+    Parameters:
+    - index: PeriodIndex in the format YYYYQX (where X is 1, 2, 3, 4)
+    
+    Returns:
+    - A DatetimeIndex with correct end dates based on custom quarterly periods
+    """
+    month_mapper = {1: 2, 2: 5, 3: 8, 4: 11}  # Mapping quarter number to ending month
+    dates = []
 
-    rates = data / 100.0
-    return annualise_rates(rates, periods)
+    for period in index:
+        year = period.year
+        quarter = period.quarter
+        end_month = month_mapper[quarter]
+        end_date = pd.Timestamp(year=year, month=end_month, day=1) + pd.offsets.MonthEnd(0)
+        dates.append(end_date)
 
+    return pd.DatetimeIndex(dates)
 
-def qtly_to_monthly(
-    data: DataT,
-    interpolate: bool = True,
-    limit: Optional[int] = 2,  # only used if interpolate is True
-    dropna: bool = True,
-) -> DataT:
-    """Convert a pandas timeseries with a Quarterly PeriodIndex to an
-    timeseries with a Monthly PeriodIndex.
+def clean_name(name: str) -> str:
+    """
+    Cleans the series name by removing any extra spaces or characters and capitalizing each word.
+
     Arguments:
-    ==========
-    data - either a pandas Series or DataFrame - assumes the index is unique.
-    interpolate - whether to interpolate the missing monthly data.
-    dropna - whether to drop NA data
-    Notes:
-    ======
-    Necessitated by Pandas 2.2, which removed .resample()
-    from pandas objects with a PeriodIndex."""
+    - name: str - series name to be cleaned.
 
-    # sanity checks
-    assert isinstance(data.index, PeriodIndex)
-    assert data.index.freqstr[0] == "Q"
-    assert data.index.is_unique
-    assert data.index.is_monotonic_increasing
+    Returns:
+    - str: cleaned series name.
+    """
+    # Remove any extra spaces or characters and capitalize each word
+    return name.strip().title()
 
-    def set_axis_monthly_periods(x: DataT) -> DataT:
-        """Convert a DatetimeIndex to a Monthly PeriodIndex."""
+def generate_summary(series_list, ref_date1, ref_date2):
+    """
+    Generates summary statistics for a list of series at specified reference dates.
 
-        return x.set_axis(
-            labels=cast(DatetimeIndex, x.index).to_period(freq="M"), axis="index"
-        )
+    Arguments:
+    - series_list: list - list of series for which summary statistics are to be generated.
+    - ref_date1: str - first reference date in 'YYYY-MM-DD' format.
+    - ref_date2: str - second reference date in 'YYYY-MM-DD' format.
 
-    # do the heavy lifting
-    data = (
-        data.set_axis(
-            labels=data.index.to_timestamp(how="end"), axis="index", copy=True
-        )
-        .resample(rule="ME")  # adds in every missing month
-        .first(min_count=1)  # generates nans for new months
-        # assumes only one value per quarter (ie. unique index)
-        .pipe(set_axis_monthly_periods)
-    )
+    Returns:
+    - DataFrame containing summary statistics for the given series at the specified reference dates.
+    """
+    # Convert ref_date1 and ref_date2 to Pandas Timestamps
+    ref_date1 = pd.to_datetime(ref_date1)
+    ref_date2 = pd.to_datetime(ref_date2)
 
-    if interpolate:
-        data = data.interpolate(limit_area="inside", limit=limit)
-    if dropna:
-        data = data.dropna()
+    # Dictionary to store summary statistics
+    summary = {}
 
-    return data
+    # Iterate over each series in the list
+    for series in series_list:
+        col_name = clean_name(series.name)
 
+        # Calculate variations for series that do not have 'rate' in their name
+        if 'Rate' not in col_name:
+            yoy_change = percent_change(series, periods=12)
+            mom_change = percent_change(series, periods=1)
+        else:
+            yoy_change = None
+            mom_change = None
 
-def monthly_to_qtly(data: DataT, q_ending="DEC") -> DataT:
-    """Convert monthly PeriodIndex data to quarterly PeriodIndex data."""
+        yearly_change = absolute_change(series, periods=12)
+        monthly_change = absolute_change(series, periods=1)
 
-    return (
-        data.pipe(
-            lambda x: x.set_axis(
-                labels=cast(PeriodIndex, x.index).to_timestamp(how="end"),
-                axis="index",
-                copy=True,
-            )
-        )
-        .resample(rule="QE")
-        .mean()
-        .pipe(
-            lambda x: x.set_axis(
-                labels=cast(DatetimeIndex, x.index).to_period(freq=f"Q-{q_ending}"),
-                axis="index",
-            )
-        )
-    )
+        # Iterate over each reference date
+        for ref_date in [ref_date1, ref_date2]:
+            date_label = ref_date.strftime('%b/%y')
+
+            # Populate the summary dictionary with statistics for the current series and reference date
+            summary[f'Value - {date_label}'] = summary.get(f'Value - {date_label}', {})
+            summary[f'Value - {date_label}'][col_name] = round(series.loc[ref_date], 2)
+            summary[f'YoY (%) - {date_label}'] = summary.get(f'YoY (%) - {date_label}', {})
+            summary[f'YoY (%) - {date_label}'][col_name] = round(yoy_change.loc[ref_date], 2) if yoy_change is not None else None
+            summary[f'MoM (%) - {date_label}'] = summary.get(f'MoM (%) - {date_label}', {})
+            summary[f'MoM (%) - {date_label}'][col_name] = round(mom_change.loc[ref_date], 2) if mom_change is not None else None
+            summary[f'Yearly Change - {date_label}'] = summary.get(f'Yearly Change - {date_label}', {})
+            summary[f'Yearly Change - {date_label}'][col_name] = round(yearly_change.loc[ref_date], 2)
+            summary[f'Monthly Change - {date_label}'] = summary.get(f'Monthly Change - {date_label}', {})
+            summary[f'Monthly Change - {date_label}'][col_name] = round(monthly_change.loc[ref_date], 2)
+
+    # Convert the summary dictionary to a DataFrame and return
+    return pd.DataFrame(summary)
